@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Optional
-from pricing.bs_model import calc_option_price, calc_greeks
+from risk.pricing import calculate_iv, calculate_greeks, delta, gamma, theta, vega, implied_volatility
 
 def generate_synthetic_chain(spot: float, time_to_expiry_years: float, r: float, iv: float, num_strikes: int = 20, strike_interval: float = 500.0) -> pd.DataFrame:
     """
@@ -15,14 +15,17 @@ def generate_synthetic_chain(spot: float, time_to_expiry_years: float, r: float,
     
     strikes = [center_strike + (i - num_strikes//2) * strike_interval for i in range(num_strikes)]
     
+    from py_vollib.black_scholes import black_scholes
+    
     data = []
     for K in strikes:
         if K <= 0:
             continue
             
         for opt_type in ['call', 'put']:
-            price = calc_option_price(spot, K, time_to_expiry_years, r, iv, opt_type)
-            greeks = calc_greeks(spot, K, time_to_expiry_years, r, iv, opt_type)
+            flag = 'c' if opt_type == 'call' else 'p'
+            price = black_scholes(flag, spot, K, time_to_expiry_years, r, iv)
+            greeks = calculate_greeks(spot, K, time_to_expiry_years, r, iv, flag)
             
             data.append({
                 'strike': K,

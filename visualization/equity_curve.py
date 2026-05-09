@@ -1,6 +1,8 @@
 import plotly.graph_objects as go
 import pandas as pd
-from engine.portfolio import Portfolio
+import numpy as np
+from backtesting.portfolio import Portfolio
+from config.settings import settings
 
 def plot_equity(portfolio: Portfolio, filename: str = "equity_curve.html"):
     if not portfolio.equity_history:
@@ -12,7 +14,10 @@ def plot_equity(portfolio: Portfolio, filename: str = "equity_curve.html"):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df['timestamp'], y=df['equity'], mode='lines', name='Equity'))
     fig.update_layout(title='Portfolio Equity Curve', xaxis_title='Time', yaxis_title='Equity ($)', template='plotly_dark')
-    fig.write_html(filename)
+    
+    output_path = settings.RESEARCH_REPORTS_DIR / filename
+    fig.write_html(str(output_path))
+    print(f"Equity curve saved to {output_path}")
     
 def generate_optimization_heatmap(results_df: pd.DataFrame, x_col: str, y_col: str, z_col: str, filename: str):
     """Generate a heatmap from optimization results."""

@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from engine.portfolio import Portfolio
+from backtesting.portfolio import Portfolio
 
 def calculate_max_drawdown(equity_series: pd.Series) -> float:
     if equity_series.empty:

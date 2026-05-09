@@ -1,11 +1,13 @@
 import pandas as pd
 from typing import Dict, Any
 from datetime import datetime, timedelta
-from engine.portfolio import Portfolio, Trade
-from strategy.core import generate_synthetic_chain, select_strikes, check_entry_conditions, calculate_exit
-from pricing.volatility import get_dynamic_iv
-from pricing.bs_model import calc_option_price
+from backtesting.portfolio import Portfolio, Trade
+from strategies.base import generate_synthetic_chain, select_strikes, check_entry_conditions, calculate_exit
+from risk.iv import get_dynamic_iv
+from risk.pricing import calculate_greeks
+from py_vollib.black_scholes import black_scholes
 import uuid
+from config.settings import settings
 
 def _get_t_years(current_ts: datetime, exit_time_str: str) -> float:
     exit_hour, exit_minute = map(int, exit_time_str.split(':'))
@@ -22,63 +24,47 @@ class BacktestEngine:
     def run(self, ohlcv_df: pd.DataFrame):
         r = self.config.get('RISK_FREE_RATE', 0.05)
         exit_time_str = self.config.get('EXIT_TIME', '23:55')
-        slippage_pct = self.config.get('SLIPPAGE_PERCENT', 0.01) # 1% of premium
+        slippage_pct = self.config.get('SLIPPAGE_PERCENT', 0.0025)
         fees_pct = self.config.get('FEES_PERCENT', 0.0003)
         
-        # We need historical vol for dynamic IV. Pre-calculate it.
-        # Assuming ohlcv_df has 'close'
-        from pricing.volatility import calc_rolling_hv
+        from risk.iv import calc_rolling_hv
         if 'rolling_hv' not in ohlcv_df.columns:
             ohlcv_df['rolling_hv'] = calc_rolling_hv(ohlcv_df['close'], window_days=30, periods_per_day=288)
-            ohlcv_df['returns_1h'] = ohlcv_df['close'].pct_change(periods=12) # 5m * 12 = 1h
+            ohlcv_df['returns_1h'] = ohlcv_df['close'].pct_change(periods=12)
             ohlcv_df.bfill(inplace=True)
             
-        # Optimization: use itertuples for 100x speedup over iterrows
         for row in ohlcv_df.itertuples():
             spot = row.close
             timestamp = row.timestamp
             time_str = timestamp.strftime("%H:%M")
             
-            # Jump Detection (5m candle)
-            # Use abs((close-open)/open) for directional jump or (high-low)/open for volatility jump
             candle_move = abs(row.close - row.open) / row.open
             
-            # Dynamic Realism Factors
             current_slippage = slippage_pct
             jump_penalty = 0.0
             
             if candle_move >= 0.08:
-                current_slippage *= 10.0 # 10x spread
-                jump_penalty = 2.0 # +200% SL slippage
+                current_slippage *= 10.0
+                jump_penalty = 2.0
             elif candle_move >= 0.05:
                 current_slippage *= 5.0
-                jump_penalty = 1.0 # +100%
+                jump_penalty = 1.0
             elif candle_move >= 0.03:
                 current_slippage *= 3.0
-                jump_penalty = 0.5 # +50%
+                jump_penalty = 0.5
             
             T_YEARS = _get_t_years(timestamp, exit_time_str)
-            
-            # Dynamic IV with Skew
             iv_dict = get_dynamic_iv(spot, getattr(row, 'rolling_hv', 0.60), getattr(row, 'returns_1h', 0.0), self.config)
             
             open_trades = self.portfolio.get_open_trades()
             
             # 1. Manage Exits
             for trade in open_trades:
-                c_mark = calc_option_price(spot, trade.call_strike, T_YEARS, r, iv_dict['call'], 'call')
-                p_mark = calc_option_price(spot, trade.put_strike, T_YEARS, r, iv_dict['put'], 'put')
+                c_mark = black_scholes('c', spot, trade.call_strike, T_YEARS, r, iv_dict['call'])
+                p_mark = black_scholes('p', spot, trade.put_strike, T_YEARS, r, iv_dict['put'])
                 
-                # Normal current prices for exit calculation
-                current_prices = {
-                    'call_mark': c_mark,
-                    'put_mark': p_mark
-                }
-                
-                pos_state = {
-                    'call_entry_price': trade.entry_price_call,
-                    'put_entry_price': trade.entry_price_put
-                }
+                current_prices = {'call_mark': c_mark, 'put_mark': p_mark}
+                pos_state = {'call_entry_price': trade.entry_price_call, 'put_entry_price': trade.entry_price_put}
                 
                 exit_reason = calculate_exit(pos_state, current_prices, self.config.get('SL_MULTIPLIER', 2.0))
                 
@@ -86,7 +72,6 @@ class BacktestEngine:
                     exit_reason = "EXPIRY"
                 
                 if exit_reason:
-                    # Apply Penalized Slippage if SL hit during Jump
                     final_slippage = current_slippage
                     if "STOP_LOSS" in exit_reason:
                         final_slippage += jump_penalty
@@ -113,7 +98,6 @@ class BacktestEngine:
                             already_traded_today = True
                             
                     if not already_traded_today and T_YEARS > 0:
-                        # For entry selection, use average IV to find strikes (strategy logic neutral)
                         avg_iv = (iv_dict['call'] + iv_dict['put']) / 2
                         chain = generate_synthetic_chain(spot, T_YEARS, r, avg_iv)
                         strikes = select_strikes(
@@ -123,10 +107,8 @@ class BacktestEngine:
                         )
                         
                         if strikes['call'] and strikes['put']:
-                            # Use specific skewed IVs for actual execution price
-                            # Re-price with skew
-                            c_exec_mark = calc_option_price(spot, strikes['call']['strike'], T_YEARS, r, iv_dict['call'], 'call')
-                            p_exec_mark = calc_option_price(spot, strikes['put']['strike'], T_YEARS, r, iv_dict['put'], 'put')
+                            c_exec_mark = black_scholes('c', spot, strikes['call']['strike'], T_YEARS, r, iv_dict['call'])
+                            p_exec_mark = black_scholes('p', spot, strikes['put']['strike'], T_YEARS, r, iv_dict['put'])
                             
                             c_entry = c_exec_mark * (1 - current_slippage)
                             p_entry = p_exec_mark * (1 - current_slippage)
@@ -146,8 +128,8 @@ class BacktestEngine:
             if open_trades or time_str == exit_time_str:
                 open_pnl = 0.0
                 for t in self.portfolio.get_open_trades():
-                    c_mark = calc_option_price(spot, t.call_strike, T_YEARS, r, iv_dict['call'], 'call')
-                    p_mark = calc_option_price(spot, t.put_strike, T_YEARS, r, iv_dict['put'], 'put')
+                    c_mark = black_scholes('c', spot, t.call_strike, T_YEARS, r, iv_dict['call'])
+                    p_mark = black_scholes('p', spot, t.put_strike, T_YEARS, r, iv_dict['put'])
                     open_pnl += (t.entry_price_call - c_mark) * t.qty
                     open_pnl += (t.entry_price_put - p_mark) * t.qty
                 self.portfolio.record_equity(timestamp, open_pnl)

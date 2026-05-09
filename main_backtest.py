@@ -1,10 +1,11 @@
 import pandas as pd
 from datetime import datetime, timedelta
-import config.settings as settings
+from config.settings import settings
 from data.ohlcv import fetch_binance_ohlcv
-from engine.backtest import BacktestEngine
-from analytics.metrics import generate_summary
-from analytics.plots import plot_equity
+from backtesting.engine import BacktestEngine
+from backtesting.metrics import generate_summary
+from visualization.equity_curve import plot_equity
+from py_vollib.black_scholes import black_scholes
 
 def main():
     print("Starting Crypto Synthetic Options Backtester...")
@@ -14,8 +15,8 @@ def main():
         'START_CAPITAL': settings.START_CAPITAL,
         'TARGET_DELTA_MIN': settings.TARGET_DELTA_MIN,
         'TARGET_DELTA_MAX': settings.TARGET_DELTA_MAX,
-        'ENTRY_WINDOW_START': settings.ENTRY_WINDOW_START,
-        'ENTRY_WINDOW_END': settings.ENTRY_WINDOW_END,
+        'ENTRY_WINDOW_START': '07:00',
+        'ENTRY_WINDOW_END': '09:00',
         'SL_MULTIPLIER': settings.SL_MULTIPLIER,
         'FEES_PERCENT': settings.FEES_PERCENT,
         'IV_MODE': 'constant',
@@ -48,12 +49,10 @@ def main():
     # Finalize any open trades at the end of the simulation
     open_trades = engine.portfolio.get_open_trades()
     for t in open_trades:
-        # Close at last candle's spot price
         last_spot = ohlcv_df.iloc[-1]['close']
         last_ts = ohlcv_df.iloc[-1]['timestamp']
-        from pricing.bs_model import calc_option_price
-        c_mark = calc_option_price(last_spot, t.call_strike, 1.0/365.0, config['RISK_FREE_RATE'], config['CONSTANT_IV'], 'call')
-        p_mark = calc_option_price(last_spot, t.put_strike, 1.0/365.0, config['RISK_FREE_RATE'], config['CONSTANT_IV'], 'put')
+        c_mark = black_scholes('c', last_spot, t.call_strike, 1.0/365.0, config['RISK_FREE_RATE'], config['CONSTANT_IV'])
+        p_mark = black_scholes('p', last_spot, t.put_strike, 1.0/365.0, config['RISK_FREE_RATE'], config['CONSTANT_IV'])
         
         t.close(last_ts, c_mark, p_mark, "END_OF_BACKTEST", config['FEES_PERCENT'])
         
@@ -64,8 +63,9 @@ def main():
         
     if engine.portfolio.trades:
         df_trades = pd.DataFrame([vars(t) for t in engine.portfolio.trades])
-        df_trades.to_csv("trade_log.csv", index=False)
-        print("Trade log saved to trade_log.csv")
+        log_path = settings.DATA_EXPORTS_DIR / "trade_log.csv"
+        df_trades.to_csv(log_path, index=False)
+        print(f"Trade log saved to {log_path}")
         
     plot_equity(engine.portfolio)
 

@@ -40,15 +40,21 @@ class Trade:
 class Portfolio:
     def __init__(self, start_capital: float):
         self.capital = start_capital
-        self.equity_curve: List[dict] = []
+        self.equity_history: List[dict] = []
         self.trades: List[Trade] = []
         
     @property
     def current_equity(self) -> float:
         return self.capital + sum(t.pnl for t in self.trades if t.status == "CLOSED")
         
-    def add_trade(self, trade: Trade):
+    def add_trade(self, trade: "Trade"):
         self.trades.append(trade)
         
-    def get_open_trades(self) -> List[Trade]:
+    def get_open_trades(self) -> List["Trade"]:
         return [t for t in self.trades if t.status == "OPEN"]
+        
+    def record_equity(self, timestamp: datetime.datetime, open_pnl: float):
+        self.equity_history.append({
+            'timestamp': timestamp,
+            'equity': self.current_equity + open_pnl
+        })
