@@ -11,6 +11,8 @@ class Trade:
     call_strike: float
     put_strike: float
     qty: float
+    call_instrument: str = ""
+    put_instrument: str = ""
     status: str = "OPEN" # OPEN, CLOSED
     exit_time: Optional[datetime.datetime] = None
     exit_price_call: Optional[float] = None
@@ -25,13 +27,11 @@ class Trade:
         self.exit_reason = reason
         self.status = "CLOSED"
         
-        # PnL calculation for short options
-        # We sold at entry, bought at exit. 
+        # PnL for short options: (Sold - Bought)
         call_pnl = (self.entry_price_call - self.exit_price_call) * self.qty
         put_pnl = (self.entry_price_put - self.exit_price_put) * self.qty
         
-        # Deduct fees (fee applies to both legs, entry and exit based on underlying qty/notional, simplified here to premium % for MVP)
-        # Assuming fees_percent is applied to total entry/exit premium
+        # Fees on notional or premium? Simplified to premium % for paper trading
         entry_fees = (self.entry_price_call + self.entry_price_put) * self.qty * fees_percent
         exit_fees = (self.exit_price_call + self.exit_price_put) * self.qty * fees_percent
         
@@ -44,24 +44,11 @@ class Portfolio:
         self.trades: List[Trade] = []
         
     @property
-    def equity_history(self):
-        return self.equity_curve
-        
-    @property
     def current_equity(self) -> float:
-        if not self.equity_curve:
-            return self.capital + sum(t.pnl for t in self.trades if t.status == "CLOSED")
-        return self.equity_curve[-1]['equity']
+        return self.capital + sum(t.pnl for t in self.trades if t.status == "CLOSED")
         
     def add_trade(self, trade: Trade):
         self.trades.append(trade)
         
     def get_open_trades(self) -> List[Trade]:
         return [t for t in self.trades if t.status == "OPEN"]
-        
-    def record_equity(self, timestamp: datetime.datetime, open_pnl: float = 0.0):
-        total_equity = self.capital + sum(t.pnl for t in self.trades if t.status == "CLOSED") + open_pnl
-        self.equity_curve.append({
-            'timestamp': timestamp,
-            'equity': total_equity
-        })

@@ -1,26 +1,40 @@
 import os
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
-load_dotenv()
+class Settings(BaseSettings):
+    # API Keys
+    DERIBIT_CLIENT_ID: Optional[str] = None
+    DERIBIT_CLIENT_SECRET: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: Optional[str] = None
+    TELEGRAM_CHAT_ID: Optional[str] = None
+    
+    # Engine Settings
+    TESTNET: bool = True
+    LOG_LEVEL: str = "INFO"
+    DB_PATH: str = "sqlite:///storage/trading.db"
+    
+    # Backtest / Paper Configuration
+    TRADING_SYMBOL: str = "BTC"
+    TARGET_DELTA_MIN: float = 0.10
+    TARGET_DELTA_MAX: float = 0.15
+    START_CAPITAL: float = 10000.0
+    
+    # Timing (UTC)
+    ENTRY_WINDOW_START: str = "07:00"
+    ENTRY_WINDOW_END: str = "09:00"
+    
+    # Risk Management
+    SL_MULTIPLIER: float = 2.0
+    FEES_PERCENT: float = 0.0003
+    SLIPPAGE_PERCENT: float = 0.0025
+    MAX_DAILY_LOSS: float = 500.0
+    MAX_OPEN_POSITIONS: int = 1
+    LIQUIDITY_MIN_BID_SIZE: float = 0.1
+    IV_MIN: float = 0.3
+    IV_MAX: float = 1.5
+    STRATEGY_COOLDOWN_MINUTES: int = 60
 
-# API Configuration
-DERIBIT_CLIENT_ID = os.getenv("DERIBIT_CLIENT_ID")
-DERIBIT_CLIENT_SECRET = os.getenv("DERIBIT_CLIENT_SECRET")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-# Backtest Configuration
-TRADING_SYMBOL = "BTC"
-TARGET_DELTA_MIN = 0.10
-TARGET_DELTA_MAX = 0.15
-
-# Entry Window (IST converted to UTC or just keep as string for logic)
-ENTRY_WINDOW_START = "07:00"
-ENTRY_WINDOW_END = "09:00"
-
-# Risk Management
-SL_MULTIPLIER = 2.0  # Stop loss at 2x entry premium
-FEES_PERCENT = 0.0003  # 0.03% fee per leg
-SLIPPAGE_PERCENT = 0.0025  # 0.25% slippage
-
-START_CAPITAL = 10000.0
+settings = Settings()
