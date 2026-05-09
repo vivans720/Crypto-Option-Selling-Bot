@@ -1,76 +1,81 @@
 import ccxt
 import pandas as pd
-from datetime import datetime
+import numpy as np
+from datetime import datetime, timedelta, UTC
 import os
 from tqdm import tqdm
+from data.storage import save_parquet, load_parquet
+from config.settings import settings
+
+def validate_ohlcv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """Check for missing candles and duplicates."""
+    if df.empty:
+        return df
+    
+    df = df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+    
+    # Check for gaps
+    time_diff = df['timestamp'].diff().median()
+    gaps = df['timestamp'].diff() > time_diff
+    if gaps.any():
+        num_gaps = gaps.sum()
+        print(f"Warning: Detected {num_gaps} gaps in data.")
+        
+    return df
 
 def fetch_binance_ohlcv(symbol: str, timeframe: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
     """
-    Fetch historical OHLCV data from Binance. 
-    Uses local .parquet cache to avoid hitting rate limits.
+    Fetch historical OHLCV data from Binance with chunking.
+    Uses local .parquet cache in data/cache.
     """
-    cache_dir = "cache"
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
-        
     safe_symbol = symbol.replace("/", "_")
-    cache_file = os.path.join(cache_dir, f"{safe_symbol}_{timeframe}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.parquet")
+    cache_file = settings.DATA_CACHE_DIR / f"{safe_symbol}_{timeframe}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.parquet"
     
-    if os.path.exists(cache_file):
-        print(f"Loading {symbol} data from cache: {cache_file}")
-        return pd.read_parquet(cache_file)
+    cached_df = load_parquet(cache_file)
+    if cached_df is not None:
+        print(f"Loading from cache: {cache_file}")
+        return cached_df
         
-    print(f"Cache miss. Fetching {symbol} from Binance via CCXT...")
     exchange = ccxt.binance({'enableRateLimit': True})
-    
-    start_ts = int(start_dt.timestamp() * 1000)
-    end_ts = int(end_dt.timestamp() * 1000)
-    
     all_ohlcv = []
-    current_ts = start_ts
     
-    # Calculate estimated iterations for tqdm
-    # 5m = 300000 ms
-    timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
-    total_candles = (end_ts - start_ts) // timeframe_ms
-    estimated_requests = total_candles // 1000 + 1
+    # Chunking: Fetch in 7-day blocks to prevent massive single requests
+    chunk_size = timedelta(days=7)
+    current_start = start_dt
     
-    pbar = tqdm(total=estimated_requests, desc=f"Downloading {symbol} {timeframe}")
-    
-    while current_ts < end_ts:
-        try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=current_ts, limit=1000)
-        except Exception as e:
-            print(f"Fetch error: {e}. Retrying after sleep...")
-            import time
-            time.sleep(5)
-            continue
-            
-        if not ohlcv:
-            break
-            
-        all_ohlcv.extend(ohlcv)
-        current_ts = ohlcv[-1][0] + 1
-        pbar.update(1)
+    total_days = (end_dt - start_dt).days
+    pbar = tqdm(total=total_days, desc=f"Downloading {symbol}")
+
+    while current_start < end_dt:
+        current_end = min(current_start + chunk_size, end_dt)
+        since = int(current_start.timestamp() * 1000)
         
-        # If we got less than 1000, we probably reached current time
-        if len(ohlcv) < 1000:
-            break
+        while since < int(current_end.timestamp() * 1000):
+            try:
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=1000)
+                if not ohlcv:
+                    break
+                all_ohlcv.extend(ohlcv)
+                since = ohlcv[-1][0] + 1
+            except Exception as e:
+                print(f"Error at {current_start}: {e}. Retrying...")
+                import time
+                time.sleep(2)
+                continue
+        
+        current_start = current_end
+        pbar.update(7 if current_start < end_dt else total_days % 7)
             
     pbar.close()
     
     if not all_ohlcv:
-        print("No data fetched!")
         return pd.DataFrame()
         
     df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
     
-    # Filter strictly between start_dt and end_dt
     df = df[(df['timestamp'] >= start_dt) & (df['timestamp'] <= end_dt)]
+    df = validate_ohlcv(df, timeframe)
     
-    # Cache to parquet
-    print(f"Saving {len(df)} rows to {cache_file}...")
-    df.to_parquet(cache_file, index=False)
-    
+    save_parquet(df, cache_file)
     return df
