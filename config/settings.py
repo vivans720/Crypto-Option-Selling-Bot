@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     DATA_PROCESSED_DIR: Path = BASE_DIR / "data" / "processed"
     DATA_CACHE_DIR: Path = BASE_DIR / "data" / "cache"
     DATA_EXPORTS_DIR: Path = BASE_DIR / "data" / "exports"
+    DATA_PARQUET_DIR: Path = BASE_DIR / "data" / "parquet"
     
     RESEARCH_REPORTS_DIR: Path = BASE_DIR / "research" / "reports"
     RESEARCH_RESULTS_DIR: Path = BASE_DIR / "research" / "results"

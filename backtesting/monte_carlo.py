@@ -18,9 +18,21 @@ def run_monte_carlo(trades: List[Trade], iterations: int = 1000):
         peak = np.maximum.accumulate(equity)
         max_dd = np.min((equity - peak) / peak)
         
+        # Calculate max losing streak
+        streak = 0
+        max_streak = 0
+        for p in shuffled:
+            if p <= 0:
+                streak += 1
+                if streak > max_streak:
+                    max_streak = streak
+            else:
+                streak = 0
+        
         results.append({
             'final_return': final_return,
-            'max_dd': max_dd
+            'max_dd': max_dd,
+            'max_losing_streak': max_streak
         })
         
     return pd.DataFrame(results)

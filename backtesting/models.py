@@ -11,6 +11,7 @@ class ExecutionConfig:
     maker_fee: float = 0.0002
     taker_fee: float = 0.0005
     fixed_slippage: float = 0.0001
+    base_spread: float = 0.0010  # 0.1% spread
     vol_multiplier: float = 2.0
     liquidity_cap_pct: float = 0.1  # Max % of candle volume
     maintenance_margin_pct: float = 0.05

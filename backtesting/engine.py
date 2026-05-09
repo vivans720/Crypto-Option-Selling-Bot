@@ -79,8 +79,10 @@ class BacktestEngine:
                     # Worse slippage for SL/Liquidations
                     mult = 2.0 if exit_reason in ["COMBINED_SL_HIT", "LIQUIDATED"] else 1.0
                     
-                    c_exit = c_mark * (1 + (current_slippage * mult))
-                    p_exit = p_mark * (1 + (current_slippage * mult))
+                    # Buying back at the ask + slippage
+                    penalty = self.exec_config.base_spread / 2 + (current_slippage * mult)
+                    c_exit = c_mark * (1 + penalty)
+                    p_exit = p_mark * (1 + penalty)
                     
                     trade.close(
                         exit_time=timestamp,
@@ -112,9 +114,10 @@ class BacktestEngine:
                             c_exec_mark = black_scholes('c', spot, strikes['call']['strike'], T_YEARS, r, iv_dict['call'])
                             p_exec_mark = black_scholes('p', spot, strikes['put']['strike'], T_YEARS, r, iv_dict['put'])
                             
-                            # Maker fee for entry
-                            c_entry = c_exec_mark * (1 - current_slippage)
-                            p_entry = p_exec_mark * (1 - current_slippage)
+                            # Maker fee for entry, selling at the bid minus slippage
+                            penalty = self.exec_config.base_spread / 2 + current_slippage
+                            c_entry = c_exec_mark * (1 - penalty)
+                            p_entry = p_exec_mark * (1 - penalty)
                             
                             new_trade = Trade(
                                 id=str(uuid.uuid4()),

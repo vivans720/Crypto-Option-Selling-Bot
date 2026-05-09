@@ -44,7 +44,19 @@ def generate_summary(portfolio: Portfolio) -> dict:
     gross_loss = abs(sum(losses)) if losses else 0.0
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
     
-    expectancy = (win_rate * np.mean(wins) if wins else 0) + ((1 - win_rate) * np.mean(losses) if losses else 0)
+    avg_win = np.mean(wins) if wins else 0.0
+    avg_loss = np.mean(losses) if losses else 0.0
+    
+    expectancy = (win_rate * avg_win) + ((1 - win_rate) * avg_loss)
+    
+    streak = 0
+    max_losing_streak = 0
+    for p in pnl_list:
+        if p <= 0:
+            streak += 1
+            max_losing_streak = max(max_losing_streak, streak)
+        else:
+            streak = 0
     
     df_eq = pd.DataFrame(portfolio.equity_history, columns=['timestamp', 'equity']).set_index('timestamp')
     df_daily = df_eq.resample('1D').last().ffill()
@@ -74,6 +86,9 @@ def generate_summary(portfolio: Portfolio) -> dict:
         'Annual Return': annual_return,
         'Largest Win': trade_pnls.max(),
         'Largest Loss': trade_pnls.min(),
+        'Avg Win': avg_win,
+        'Avg Loss': avg_loss,
         'Avg Profit': trade_pnls.mean(),
+        'Longest Losing Streak': max_losing_streak,
         'Recovery Factor': net_pnl / abs(max_dd * portfolio.capital) if max_dd != 0 else 0
     }
