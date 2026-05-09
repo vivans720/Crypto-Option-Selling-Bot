@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Environment
+.env
+
+# Data & Cache
+cache/
+*.parquet
+*.csv
+!requirements.txt
+
+# Backtest Reports & HTML
+*.html
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Docker logs
+*.log
